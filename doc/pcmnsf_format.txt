@@ -1,0 +1,173 @@
+PCMNSF FORMAT DEFINITION
+------------------------
+
+HEADER REGION:
+
+Address
+0000-007F: 	NSF Header
+0080-00BF:	Sample Addresses, Lower (L)
+		Range=[0,255] (L = DATA_ADDRESS&0xFF)
+00C0-00FF:	Sample Addresses, Upper (H) 
+		Range=[0,15] (H = (DATA_ADDRESS>>8)&0xF)
+0100-013F:	Sample Addresses, Bank (B)
+		Range=[0,255] (B = (DATA_ADDRESS>>12)
+
+		(total 12bit address + 8bit bank)
+		(64 sample entries)
+
+0140-017F:	Sample End Addresses, Upper
+0180-01BF:	Sample End Addresses, Bank
+01C0-01FF:	Sample Loop Sizes, Lower (8bit) 
+0200-023F:	Sample Loop Sizes, Upper (4bit)
+0240-027F:	Sample Loop Sizes, Bank (total 12+8 bit number)
+		sample loop size = (sample end [exclusive] - loop_start)
+
+0280:		Pattern Reset Address, Lower (8bit)
+0281:		Pattern Reset Address, Upper (4bit)
+0282:		Pattern Reset Address, Bank (8bit)
+
+Lower = address & 0xFF
+Upper = (address >> 8) & 0xF
+Bank = address >> 12
+
+NOTE: addresses do not include the 0x80 bytes of nsf header, actual address
+should be file address - 0x80!!
+
+PROGRAM REGION:
+
+xxxx-187F:	NES Program Data
+
+DATA REGION:
+
+Pattern and sample data is appended to the template file with their 
+addresses stored in the header region.
+
+-------------------------------------------------------------------------------
+
+Pattern [Sequencer] Format:
+
+[start of event]
+
+Byte:	Data flags for channels 1 and 2
+	bit0 = new sample index (channel1)
+	bit1 = sample offset is used (bit0 MUST be set too.)
+	bit2 = new volume level
+	bit3 = new rate level
+	bit4-7 = flags for channel2
+
+Depending on the data flags, certain data follows (index,offset,volume,rate respectively)
+Sample index is one byte, range [0,63]
+Sample offset is one byte, range [0,255]
+Volume is one byte, range is [0,31] with a special bit operation applied:
+	"byte = volume<<6 | volume>>2"
+	To acquire volume from MOD volume [0,64] here is a forumla:
+		v = round(log(m/64+1)*31 / log(2))
+Rate is one or two bytes.
+	If bit0 of the first rate byte is set then it is a one-byte version
+	otherwise it is a 15-bit direct value (with top byte shifted)
+	bit format: yyyyyyy0xxxxxxxx (upper byte will be shifted right)
+	but if bit0 is set, the byte is a 7bit signed relative offset
+		ie current rate += (signed)byte>>1
+	(and see weird bit complementing below)
+	NOTE: with absolute rate, the upper byte (yyyyyyy0) is written first
+
+Byte:	Data flags for channels 3 and 4
+Byte:	Duration + Restart (dddddddr)
+	bit0 = restart
+	bit1-7 = duration (duration: 1-127 = 1-127 units, 0 = 256 units)
+
+	if restart bit is set then the pattern address will be reloaded 
+	with $2C0-$2C2 values
+
+[end of event]
+
+
+The duration of the event will be "d*5 + y" samples. d is the duration
+value (1-127, or 256). y is the variable amount of time that will be
+used while the player is busy processing the event. This may be somewhat
+confusing to predict:
+
+		y=1		 		(update-start overhead)
+	channel1:
+		y += 2				(reading flags, testing sample bit, preparing for sample change)
+		y += 2 if sample bit set	(changing sample, testing for offset)
+		y += 1 if offset bit set	(applying offset)
+		if no rate:
+			y += 1			(some rate operation)
+		else if direct rate:
+			y += 2			(read and write)
+		else if slide rate:
+			y += 3			(read and slide)
+		endif
+	channel2:
+		y += 1				(flags are already cached)
+		y += 2 if sample bit set
+		y += 1 if offset bit set
+		y += 1,2 or 3 (depending on rate operation)
+	channel3:
+		y += 2
+		y += 2 if sample bit set
+		y += 1 if offset bit set
+		y += 1,2 or 3 (depending on rate operation)
+	channel4:
+		y += 1				(flags are already cached)
+		y += 2 if sample bit set
+		y += 1 if offset bit set
+		y += 1,2 or 3 (depending on rate operation)
+		
+		y += 1				(reading duration, finishing update)
+
+SPECIAL PAGE-CROSSING QUIRK:
+
+Each page (256-bytes) can only contain 240 bytes of pattern data. The last 16
+bytes must be filled with the same 16 bytes from the beginning of the next page.
+
+EXAMPLE DATA:
+
+starting at offset 230 in page:
+
+230    232          236          240          244          248          252
+AA BB  13 15 F2 2A  34 F5 F9 8A  3F 2S 45 24  58 A6 78 28  78 78 78 78  78 78 78 78
+
+(next page, duplicate data)
+0            4            8            12           16
+3F 2S 45 24  58 A6 78 28  78 78 78 78  78 78 78 78  ...new data
+
+REASON:
+
+The pattern reader only checks for page crossing inbetween updates, so it may advance
+a bunch of bytes (less than 16) before checking/adjusting the read offset for
+page crossing.
+
+-------------------------------------------------------------------------------
+
+Sample Format:
+
+Samples are in 6-bit unsigned format (stored in bits0-5 of each byte, with top 2
+bits cleared). The minimum loop length is ???. One-shot samples must still have a 
+loop (a loop of zeros at the end). The end of the sample should be padded with 
+some ??? amount of copies of the loop start region.
+
+??? is probably 256
+
+Note that there will be a _slight_ time delay when samples cross ROM banks.
+Each ROM bank is 4 kilobytes. It may not be a problem but ideally small loops
+should not cross ROM banks.
+
+-------------------------------------------------------------------------------
+
+Tuning:
+
+To convert 'rate' into sampling frequency: hz = 1789773/cps * (rate XOR 255)/256
+Currently, 'cps' (cycles-per-sample) is 204.
+
+The bottom 8-bits of 'rate' are complemented (inverted) to compensate for the weird
+resampling method.
+
+-------------------------------------------------------------------------------
+7:56 AM 2/12/2010 (weird rate complement)
+2:36 AM 12/19/2009 (mukunda)
+9:36 AM 12/19/2009 (question answering)
+12:28 PM 12/21/2009 (EVENT)
+9:13 AM 12/22/2009 (typos, sample-rom bank note)
+9:34 AM 1/7/2010 (address calculation typo, changed cps, added program end addr)

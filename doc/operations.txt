@@ -1,0 +1,14 @@
+count/start update
+
+read cbits		-> test source/reset
+test source/reset	-> set source OR apply volume
+set source		-> test/apply offset
+test/apply offset	-> apply offset #2
+apply offset #2		-> apply volume
+apply volume		-> apply rate1
+apply rate1		-> apply rate copyh, copy rate, slide rate
+apply rate copyh	-> next
+copy rate		-> next
+slide rate		-> copy rate
+
+update end	

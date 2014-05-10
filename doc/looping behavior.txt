@@ -1,0 +1,16 @@
+3 variables for address:
+BANK, HIGH ADDRESS, LOW ADDRESS
+(0-255), (0-15), (0-255)
+
+sample table contains:
+sample start bank,address
+sample end bank,address
+sample loop size
+
+if channel_bank == end_bank then
+	if channel_high_address == end_high_address then
+		channel_low_address -= loop_size_low
+		channel_high_address -= loop_size_high
+		channel_bank -= loop_size_bank
+	end if
+end if
